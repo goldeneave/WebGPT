@@ -1,0 +1,455 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Chat with Local LLM</title>
+    <style>
+        /* 全局样式 */
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            width: 100vw;
+            height: 100vh;
+            background-color: #e0f2f7;
+            color: #333;
+            line-height: 1.6;
+            overflow: hidden;
+        }
+
+        /* 聊天容器 */
+        #chat-container {
+            width: 100%; /* 调整回全屏 */
+            height: 100%; /* 调整回全屏 */
+            display: flex;
+            flex-direction: column;
+            background-color: #ffffff;
+            border-radius: 0; /* 移除圆角 */
+            box-shadow: none; /* 移除阴影 */
+            overflow: hidden;
+            border: none;
+        }
+
+        /* 聊天历史区 */
+        #chat-history {
+            flex-grow: 1;
+            padding: 25px;
+            overflow-y: auto;
+            border-bottom: 1px solid #e9e9e9;
+            display: flex;
+            flex-direction: column;
+            gap: 20px;
+            scroll-behavior: smooth;
+        }
+
+        /* 消息行容器 */
+        .message-row {
+            display: flex;
+            align-items: flex-start;
+            gap: 10px;
+        }
+
+        .user-message-row {
+            justify-content: flex-end;
+        }
+
+        .ai-message-row {
+            justify-content: flex-start;
+        }
+
+        /* 头像 */
+        .avatar {
+            width: 40px;
+            height: 40px;
+            border-radius: 50%;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            font-size: 1.2em;
+            color: white;
+            flex-shrink: 0;
+            overflow: hidden;
+        }
+        .avatar img {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+        }
+        .user-avatar {
+            background-color: #007bff;
+        }
+        .ai-avatar {
+            background-color: #888;
+        }
+
+        /* 用户消息气泡 */
+        .user-message-content {
+            max-width: calc(100% - 60px);
+            padding: 14px 20px;
+            border-radius: 22px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            word-wrap: break-word;
+            line-height: 1.5;
+            position: relative;
+            background-color: #007bff;
+            color: white;
+            border-bottom-right-radius: 6px;
+        }
+
+        /* AI 消息容器 (包含思考和回复) */
+        .ai-message-container {
+            max-width: calc(100% - 60px);
+            background-color: #f0f0f0;
+            border-radius: 22px;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+            padding: 0; /* Ensures no extra padding on the container itself */
+            overflow: hidden;
+            display: flex;
+            flex-direction: column;
+            border-bottom-left-radius: 6px;
+            position: relative;
+        }
+
+        /* [新增] AI消息头部，用于包裹思考切换按钮 */
+        .ai-message-header {
+            padding: 10px 20px 15px 20px; /* Increased bottom padding for spacing */
+            display: flex;
+            justify-content: flex-start;
+            align-items: center;
+        }
+
+        .ai-message-container::after {
+             content: '';
+            position: absolute;
+            left: -8px;
+            bottom: 0;
+            width: 0;
+            height: 0;
+            border: 10px solid transparent;
+            border-right-color: #f0f0f0;
+            border-bottom-color: #f0f0f0;
+            border-bottom-right-radius: 5px;
+        }
+
+        /* AI 最终回复内容 */
+        .ai-response-content {
+            padding: 14px 20px; /* Standard padding for content */
+            user-select: text;
+            word-break: break-word;
+            margin-top: 10px; /* Add top margin for spacing */
+        }
+
+        /* [新增] 当AI回复为空时，给一个最小高度，防止箭头错位 */
+        .ai-response-content:empty {
+            min-height: 1.5em;
+        }
+
+        /* [恢复] 思考过程区域 */
+        .thinking-process {
+            background-color: #e0f7fa;
+            color: #0d6e7e;
+            border-radius: 15px;
+            margin: 0 15px;
+            margin-top: 10px; /* Add top margin for spacing */
+            overflow: hidden;
+            transition: max-height 0.4s ease-out, padding 0.4s ease-out, opacity 0.3s ease-out;
+            max-height: 0;
+            padding: 0 15px;
+            opacity: 0;
+            font-size: 0.88em;
+            line-height: 1.4;
+            display: none; /* 默认不显示 */
+        }
+
+        /* [恢复] 思考过程展开状态 */
+        .thinking-process.visible {
+            display: block; /* 设为可见，才能应用过渡动画 */
+        }
+
+        .thinking-process.expanded {
+            max-height: 250px;
+            padding: 10px 15px;
+            opacity: 1;
+        }
+
+        /* [恢复] 思考过程切换按钮 */
+        .thinking-toggle {
+            background: none;
+            border: none;
+            color: #007bff;
+            cursor: pointer;
+            font-size: 0.9em;
+            padding: 0; /* No internal padding */
+            margin-bottom: 0; /* Remove bottom margin, spacing handled by header padding */
+            text-align: left;
+            outline: none;
+            font-weight: bold;
+            display: none; /* Default hidden */
+            white-space: nowrap;
+            /* Removed absolute positioning */
+        }
+        .thinking-toggle.visible {
+            display: block;
+        }
+
+        /* 输入区域 */
+        #input-area {
+            display: flex;
+            padding: 20px 25px;
+            background-color: #f8f9fa;
+            border-top: 1px solid #e9e9e9;
+            align-items: center;
+            gap: 15px;
+        }
+
+        /* 用户输入框 */
+        #user-input {
+            flex-grow: 1;
+            padding: 14px 20px;
+            border: 1px solid #ced4da;
+            border-radius: 28px;
+            font-size: 1.05rem;
+            resize: none;
+            min-height: 50px;
+            max-height: 160px;
+            overflow-y: auto;
+        }
+
+        #send-button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 14px 30px;
+            border-radius: 28px;
+            cursor: pointer;
+            font-size: 1.05rem;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+    <div id="chat-container">
+        <div id="chat-history"></div>
+        <div id="input-area">
+            <textarea id="user-input" placeholder="输入你的消息..." rows="1" autofocus></textarea>
+            <button id="send-button">&#9992;</button>
+        </div>
+    </div>
+
+    <script>
+        // --- API 配置区域 ---
+        const OPENAI_API_KEY = "b42e0b5a3a843a17e1ad39437de13161"; // 你的API Key
+        const BASE_URL = "http://10.70.7.215:8000/v1"; // 部署服务的IP地址与端口
+        const API_PATH = "/chat/completions"; // chat completions endpoint
+
+        const API_ENDPOINT = `${BASE_URL}${API_PATH}`;
+        const MODEL_NAME = "DS32"; // 你在Python代码中指定的模型名称
+        const SEPARATOR_TOKEN = "</think>"; // 定义分隔符
+
+        const chatHistory = document.getElementById('chat-history');
+        const userInput = document.getElementById('user-input');
+        const sendButton = document.getElementById('send-button');
+
+        // 头像图片的 URL (可选)
+        const USER_AVATAR_URL = 'C:/Users/张义鑫/Pictures/27d40e3f57d9d7eb319470dd388b541.jpg';
+        const AI_AVATAR_URL = 'C:/Users/张义鑫/Pictures/75af0b914ee683b2a141575d954def5.jpg';
+        // --- API 配置区域结束 ---
+
+
+        let messages = [
+            { role: "system", content: "你现在是东北财经大学创新创业学院的智能问答助手，接下来用户会向你提问，请用中文回答，请你确保你的回复符合你的身份，不要回答敏感话题。" }
+        ];
+
+        // 辅助函数：创建并添加头像元素
+        function createAvatar(role) {
+            const avatarDiv = document.createElement('div');
+            avatarDiv.classList.add('avatar', `${role}-avatar`);
+
+            const avatarImg = document.createElement('img');
+            avatarImg.src = role === 'user' ? USER_AVATAR_URL : AI_AVATAR_URL;
+            avatarImg.alt = role === 'user' ? 'User Avatar' : 'AI Avatar';
+            avatarDiv.appendChild(avatarImg);
+
+            return avatarDiv;
+        }
+
+        /**
+         * [核心修改] 辅助函数，用于创建消息UI结构
+         * 对于AI消息，它会创建包含思考、按钮和回复的完整结构，并返回这些元素的句柄
+         */
+        function addMessage(role, content = '') {
+            const messageRow = document.createElement('div');
+            messageRow.classList.add('message-row', `${role}-message-row`);
+            const avatar = createAvatar(role);
+
+            if (role === 'user') {
+                const messageContent = document.createElement('div');
+                messageContent.classList.add('user-message-content');
+                messageContent.textContent = content;
+                messageRow.appendChild(messageContent);
+                messageRow.appendChild(avatar);
+                chatHistory.appendChild(messageRow);
+                return null;
+            } else { // role === 'ai'
+                const aiContainer = document.createElement('div');
+                aiContainer.classList.add('ai-message-container');
+
+                const thinkingDiv = document.createElement('div');
+                thinkingDiv.classList.add('thinking-process');
+
+                const toggleButton = document.createElement('button');
+                toggleButton.classList.add('thinking-toggle');
+                toggleButton.textContent = '显示思考 ▼';
+
+                const responseContent = document.createElement('div');
+                responseContent.classList.add('ai-response-content');
+
+                // NEW: Create a header for the toggle button
+                const aiMessageHeader = document.createElement('div');
+                aiMessageHeader.classList.add('ai-message-header');
+                aiMessageHeader.appendChild(toggleButton); // Move toggle button into header
+
+                aiContainer.appendChild(aiMessageHeader); // Add header first
+                aiContainer.appendChild(thinkingDiv);
+                aiContainer.appendChild(responseContent);
+
+                messageRow.appendChild(avatar);
+                messageRow.appendChild(aiContainer);
+                chatHistory.appendChild(messageRow);
+
+                // [修改] 默认AI消息的思考过程是可见并展开的
+                thinkingDiv.classList.add('visible', 'expanded');
+                toggleButton.classList.add('visible');
+                toggleButton.textContent = '隐藏思考 ▲'; // 默认显示为"隐藏"
+
+                toggleButton.onclick = () => {
+                    thinkingDiv.classList.toggle('expanded');
+                    const isExpanded = thinkingDiv.classList.contains('expanded');
+                    toggleButton.textContent = isExpanded ? '隐藏思考 ▲' : '显示思考 ▼';
+                    chatHistory.scrollTop = chatHistory.scrollHeight;
+                };
+
+                // 返回多个元素的句柄，以便sendMessage函数可以分别控制它们
+                return { thinkingEl: thinkingDiv, toggleEl: toggleButton, answerEl: responseContent };
+            }
+        }
+
+        /**
+         * [核心修改] 处理发送消息的逻辑，支持解析<think>标签
+         */
+        async function sendMessage() {
+            const userMessage = userInput.value.trim();
+            if (!userMessage) return;
+
+            addMessage('user', userMessage);
+            messages.push({ role: "user", content: userMessage });
+            userInput.value = '';
+            userInput.style.height = 'auto';
+
+            // 1. 创建AI消息的UI结构，并获取各个部分的句柄
+            const aiElements = addMessage('ai');
+            if (!aiElements) return;
+            const { thinkingEl, toggleEl, answerEl } = aiElements;
+            chatHistory.scrollTop = chatHistory.scrollHeight;
+
+            let buffer = ""; // 用于缓冲流式数据
+            let thinkingPart = "";
+            let answerPart = "";
+            let parsingState = "thinking"; // 初始状态为 'thinking'
+
+            try {
+                const response = await fetch(API_ENDPOINT, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${OPENAI_API_KEY}` },
+                    body: JSON.stringify({ model: MODEL_NAME, messages, temperature: 0.7, stream: true })
+                });
+
+                if (!response.ok) throw new Error((await response.json()).error.message);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // 处理可能包含多条数据的缓冲
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop(); // 保留最后一行不完整的作为下一次的缓冲
+
+                    for (const line of lines) {
+                        if (line.trim() === '' || line.trim() === 'data: [DONE]') continue;
+
+                        if (line.startsWith('data: ')) {
+                            try {
+                                const json = JSON.parse(line.substring(6));
+                                const content = json.choices[0].delta.content || '';
+
+                                if (content) {
+                                    if (parsingState === "thinking") {
+                                        const separatorIndex = (thinkingPart + content).indexOf(SEPARATOR_TOKEN);
+                                        if (separatorIndex !== -1) {
+                                            thinkingPart += content.substring(0, separatorIndex);
+
+                                            thinkingEl.textContent = thinkingPart;
+                                            // [修改] 检测到分隔符时，折叠思考过程
+                                            thinkingEl.classList.remove('expanded');
+                                            toggleEl.textContent = '显示思考 ▼';
+
+                                            parsingState = "answering";
+                                            answerPart += content.substring(separatorIndex + SEPARATOR_TOKEN.length);
+                                            answerEl.textContent = answerPart;
+                                        } else {
+                                            thinkingPart += content;
+                                            thinkingEl.textContent = thinkingPart;
+                                        }
+                                    } else { // parsingState === "answering"
+                                        answerPart += content;
+                                        answerEl.textContent = answerPart;
+                                    }
+                                }
+                            } catch (e) {
+                                console.error('解析JSON失败:', e, 'Line:', line);
+                            }
+                        }
+                    }
+                    chatHistory.scrollTop = chatHistory.scrollHeight;
+                }
+
+                // 4. 流结束后，将最终的"回答"部分存入历史记录
+                if (answerPart) {
+                    messages.push({ role: "assistant", content: answerPart });
+                } else if(thinkingPart) {
+                    // 如果只有思考没有回答，将思考内容作为回答存入历史（或给出提示）
+                    messages.push({ role: "assistant", content: thinkingPart });
+                }
+
+            } catch (error) {
+                console.error('发送消息失败:', error);
+                answerEl.textContent = `抱歉，请求失败：${error.message}`;
+            }
+        }
+
+        // --- 事件监听器 ---
+        sendButton.addEventListener('click', sendMessage);
+        userInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+        userInput.addEventListener('input', () => {
+            userInput.style.height = 'auto';
+            userInput.style.height = `${userInput.scrollHeight}px`;
+        });
+
+        // addMessage('ai', '你好！我是你的AI助手，我的回答会包含思考过程，你可以点击按钮展开查看。');
+    </script>
+</body>
+</html>
